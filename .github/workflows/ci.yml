@@ -31,7 +31,7 @@ jobs:
         working-directory: services/${{ matrix.service }}
       - run: ruff check app tests
         working-directory: services/${{ matrix.service }}
-      - run: pytest -q
+      - run: python -m pytest -q
         working-directory: services/${{ matrix.service }}
   images:
     needs: [frontend, python]
