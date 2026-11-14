@@ -1,0 +1,68 @@
+name: SocialSync CI
+on:
+  push:
+    branches: ['**']
+  pull_request:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: frontend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run test
+      - run: npm run build
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [post-service, media-service, publisher-service]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r requirements.txt
+        working-directory: services/${{ matrix.service }}
+      - run: ruff check app tests
+        working-directory: services/${{ matrix.service }}
+      - run: pytest -q
+        working-directory: services/${{ matrix.service }}
+  images:
+    needs: [frontend, python]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: frontend
+            context: ./frontend
+          - name: post-service
+            context: ./services/post-service
+          - name: media-service
+            context: ./services/media-service
+          - name: publisher-service
+            context: ./services/publisher-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Lowercase registry owner
+        id: image
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and optionally push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ghcr.io/${{ steps.image.outputs.owner }}/socialsync-${{ matrix.name }}:latest
