@@ -105,3 +105,4 @@ Each service has `/health`; the post and media services have `/ready`, and the p
 - **Reset local demo:** `docker compose down -v` removes all local database, queue, and media volumes.
 
 The hosted preview in this development environment uses a small Next.js/Drizzle demonstration adapter for the same interface; it is separate from the requested Compose/Kubernetes deployment and simulates publishing locally. It does not transcode audio or perform real platform publishing. The standalone project is the Vite + FastAPI stack described above.
+
