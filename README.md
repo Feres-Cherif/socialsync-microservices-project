@@ -1,6 +1,6 @@
 # SocialSync
 
-**One post. Every platform.** SocialSync is a university DevOps project demonstrating containerized microservices, independent database schemas, asynchronous publishing, Docker Compose, Kubernetes, and CI. Upload a PNG, MP4, or MP3, write a caption, and send it to LinkedIn, a Facebook Page, Instagram, and YouTube. Simulation is on by default; no social accounts are needed to try it.
+**One post. Every platform.** SocialSync is a university DevOps project demonstrating containerized microservices, independent database schemas, asynchronous publishing, Docker Compose, Kubernetes, and CI. Upload a PNG, MP4, or MP3, write a caption, and send it to LinkedIn, a Facebook Page, Instagram, and YouTube, Simulation is on by default; no social accounts are needed to try it.
 
 ## Architecture
 
