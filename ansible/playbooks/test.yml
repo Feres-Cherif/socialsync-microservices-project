@@ -1,0 +1,7 @@
+---
+- name: Mon premier playbook
+  hosts: socialsync
+  tasks:
+    - name: Afficher un message
+      ansible.builtin.debug:
+        msg: "Bonjour depuis Ansible"
