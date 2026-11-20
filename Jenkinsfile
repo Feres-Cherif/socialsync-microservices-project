@@ -1,5 +1,8 @@
 pipeline {
-  agent any
+  agent any 
+  environment {
+    KUBECONFIG = '/var/jenkins_home/.kube/config'
+  }
   stages {
     stage('Checkout') {
       steps { checkout scm }
