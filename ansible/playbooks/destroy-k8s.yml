@@ -1,0 +1,13 @@
+# Utilisation : ansible-playbook -i inventory/hosts.ini playbooks/destroy-k8s.yml
+# Supprime le cluster kind (et donc toute l'application déployée)
+- name: Supprimer le cluster SocialSync
+  hosts: socialsync
+  gather_facts: true
+  vars_files:
+    - vars-k8s.yml
+  environment:
+    PATH: "{{ bin_dir }}:{{ lookup('env', 'PATH') }}"
+  tasks:
+    - name: Supprimer le cluster kind
+      ansible.builtin.command: "kind delete cluster --name {{ cluster_name }}"
+      changed_when: true

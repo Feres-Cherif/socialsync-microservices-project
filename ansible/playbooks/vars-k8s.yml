@@ -1,0 +1,17 @@
+# Variables du déploiement SocialSync
+project_root: "{{ playbook_dir }}/../.."
+cluster_name: socialsync
+bin_dir: "{{ lookup('env', 'HOME') }}/.local/bin"
+kind_version: v0.33.0
+images:
+  - socialsync-post:local
+  - socialsync-media:local
+  - socialsync-publisher:local
+  - socialsync-frontend:local
+# Supervision (mot de passe de démonstration, à changer en production)
+grafana_password: socialsync-grafana
+monitoring_manifests:
+  - prometheus.yaml
+  - grafana-provider.yaml
+  - grafana-dashboards.yaml
+  - grafana.yaml
