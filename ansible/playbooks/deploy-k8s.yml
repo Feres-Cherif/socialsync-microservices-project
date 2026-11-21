@@ -1,0 +1,155 @@
+# Utilisation (depuis le dossier ansible/) :
+#   ansible-playbook -i inventory/hosts.ini playbooks/deploy-k8s.yml
+# =============================================================
+#  SocialSync - Déploiement automatisé avec Ansible
+#  1) Vérifie / installe les outils (docker, kind, kubectl)
+#  2) Construit les images Docker des microservices
+#  3) Crée le cluster Kubernetes (kind)
+#  4) Charge les images et déploie l'application (k8s/)
+#  5) Déploie la supervision (Prometheus + Grafana)
+# =============================================================
+- name: Déployer SocialSync sur Kubernetes (kind)
+  hosts: socialsync
+  gather_facts: true
+  vars_files:
+    - vars-k8s.yml
+  environment:
+    PATH: "{{ bin_dir }}:{{ lookup('env', 'PATH') }}"
+
+  tasks:
+    # ---------- 1. Prérequis ----------
+    - name: Vérifier que Docker répond
+      ansible.builtin.command: docker info --format "{{ '{{' }}.ServerVersion{{ '}}' }}"
+      register: docker_check
+      changed_when: false
+
+    - name: Afficher la version de Docker
+      ansible.builtin.debug:
+        msg: "Docker Engine {{ docker_check.stdout }}"
+
+    - name: Créer le dossier des binaires
+      ansible.builtin.file:
+        path: "{{ bin_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Installer kind
+      ansible.builtin.get_url:
+        url: "https://kind.sigs.k8s.io/dl/{{ kind_version }}/kind-linux-amd64"
+        dest: "{{ bin_dir }}/kind"
+        mode: "0755"
+
+    - name: Vérifier si kubectl est présent
+      ansible.builtin.command: kubectl version --client
+      register: kubectl_check
+      changed_when: false
+      failed_when: false
+
+    - name: Récupérer la dernière version stable de kubectl
+      ansible.builtin.uri:
+        url: https://dl.k8s.io/release/stable.txt
+        return_content: true
+      register: kubectl_stable
+      when: kubectl_check.rc != 0
+
+    - name: Installer kubectl
+      ansible.builtin.get_url:
+        url: "https://dl.k8s.io/release/{{ kubectl_stable.content | trim }}/bin/linux/amd64/kubectl"
+        dest: "{{ bin_dir }}/kubectl"
+        mode: "0755"
+      when: kubectl_check.rc != 0
+
+    # ---------- 2. Build des images ----------
+    - name: Construire les images Docker des microservices
+      ansible.builtin.command: docker compose build
+      args:
+        chdir: "{{ project_root }}"
+      register: build
+      changed_when: true
+
+    # ---------- 3. Cluster Kubernetes ----------
+    - name: Lister les clusters kind existants
+      ansible.builtin.command: kind get clusters
+      register: kind_clusters
+      changed_when: false
+
+    - name: Écrire la configuration du cluster (1 master + 1 worker)
+      ansible.builtin.copy:
+        dest: /tmp/kind-socialsync.yaml
+        mode: "0644"
+        content: |
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+            - role: worker
+
+    - name: Créer le cluster kind
+      ansible.builtin.command: >
+        kind create cluster --name {{ cluster_name }}
+        --config /tmp/kind-socialsync.yaml --wait 120s
+      when: cluster_name not in kind_clusters.stdout_lines
+
+    # ---------- 4. Déploiement ----------
+    - name: Charger les images dans le cluster
+      ansible.builtin.command: "kind load docker-image {{ images | join(' ') }} --name {{ cluster_name }}"
+      changed_when: true
+
+    - name: Appliquer les manifests Kubernetes (kustomize)
+      ansible.builtin.command: "kubectl --context kind-{{ cluster_name }} apply -k {{ project_root }}/k8s"
+      register: apply
+      changed_when: "'created' in apply.stdout or 'configured' in apply.stdout"
+
+    - name: Attendre la fin des migrations de base de données
+      ansible.builtin.command: >
+        kubectl --context kind-{{ cluster_name }} -n socialsync
+        wait --for=condition=complete job/socialsync-migrations --timeout=300s
+      changed_when: false
+
+    - name: Attendre que tous les déploiements soient disponibles
+      ansible.builtin.command: >
+        kubectl --context kind-{{ cluster_name }} -n socialsync
+        wait --for=condition=available deployment --all --timeout=300s
+      changed_when: false
+
+    # ---------- 5. Supervision ----------
+    - name: Créer le secret du compte admin Grafana
+      ansible.builtin.shell: >
+        set -o pipefail &&
+        kubectl --context kind-{{ cluster_name }} -n socialsync
+        create secret generic grafana-admin --from-literal=password={{ grafana_password }}
+        --dry-run=client -o yaml |
+        kubectl --context kind-{{ cluster_name }} apply -f -
+      args:
+        executable: /bin/bash
+      register: grafana_secret
+      changed_when: "'created' in grafana_secret.stdout or 'configured' in grafana_secret.stdout"
+
+    - name: Déployer Prometheus et Grafana
+      ansible.builtin.command: >
+        kubectl --context kind-{{ cluster_name }} apply
+        {% for f in monitoring_manifests %} -f {{ project_root }}/k8s/monitoring/{{ f }}{% endfor %}
+      register: monitoring
+      changed_when: "'created' in monitoring.stdout or 'configured' in monitoring.stdout"
+
+    - name: Attendre que Prometheus et Grafana soient disponibles
+      ansible.builtin.command: >
+        kubectl --context kind-{{ cluster_name }} -n socialsync
+        wait --for=condition=available deployment/prometheus deployment/grafana --timeout=300s
+      changed_when: false
+
+    - name: Récupérer l'état des pods
+      ansible.builtin.command: "kubectl --context kind-{{ cluster_name }} -n socialsync get pods -o wide"
+      register: pods
+      changed_when: false
+
+    - name: Afficher l'état des pods
+      ansible.builtin.debug:
+        var: pods.stdout_lines
+
+    - name: Comment accéder aux interfaces
+      ansible.builtin.debug:
+        msg:
+          - "Application : kubectl --context kind-{{ cluster_name }} -n socialsync port-forward svc/frontend 8081:8080   -> http://localhost:8081"
+          - "Prometheus  : kubectl --context kind-{{ cluster_name }} -n socialsync port-forward svc/prometheus 9090:9090 -> http://localhost:9090"
+          - "Grafana     : kubectl --context kind-{{ cluster_name }} -n socialsync port-forward svc/grafana 3000:3000    -> http://localhost:3000 (admin / {{ grafana_password }})"
